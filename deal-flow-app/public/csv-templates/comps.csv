@@ -1,0 +1,3 @@
+compType,address1,city,state,postalCode,rsf,rentPsfStart,escalationPct,tiPsf,freeRentMonths,compDate,sourceUrl
+Lease,10 Corporate Dr,Burlington,MA,01803,12000,38,3,40,3,2024-06-01,https://example.com/comp1
+Sale,5 Tech Park,Woburn,MA,01801,90000,,,,,2023-11-15,https://example.com/comp2

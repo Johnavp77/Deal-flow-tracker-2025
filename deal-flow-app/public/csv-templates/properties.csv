@@ -1,0 +1,3 @@
+address1,city,state,postalCode,submarket,propertyType,buildingClass,rsfTotal,ownerName,sourceUrl,lat,lng
+10 Corporate Dr,Burlington,MA,01803,Burlington/Woburn,Office,A,120000,,,
+5 Tech Park,Woburn,MA,01801,Burlington/Woburn,Office,B,90000,,,

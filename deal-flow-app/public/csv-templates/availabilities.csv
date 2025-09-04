@@ -1,0 +1,3 @@
+address1,city,state,postalCode,suite,rsf,floor,condition,deliveryDate,askingRentPsf,leaseType,opExPsf,baseYear,nnnPsf,tiPsf,freeRentMonths,escalationPct,termMin,termMax
+10 Corporate Dr,Burlington,MA,01803,Suite 500,12000,5,Second Gen,2025-12-01,38,NNN,,,"12",40,3,3,60,96
+5 Tech Park,Woburn,MA,01801,Suite 300,10000,3,Shell,2026-01-15,36,Gross,0,,,"",0,0,60,84
