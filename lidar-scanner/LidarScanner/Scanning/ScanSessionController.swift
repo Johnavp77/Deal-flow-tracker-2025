@@ -116,8 +116,14 @@ final class ScanSessionController: NSObject, ObservableObject {
     /// Captures the current mesh, pauses the session, and writes the
     /// selected file formats to the scan library on a background task.
     /// When captureColor is on, collected camera keyframes are projected
-    /// onto the mesh to produce per-vertex colors.
-    func finishScan(name: String, formats: [ExportFormat], captureColor: Bool) async throws -> ScanRecord {
+    /// onto the mesh to produce per-vertex colors. Quality controls
+    /// decimation of the exported files; the raw mesh is kept at full detail.
+    func finishScan(
+        name: String,
+        formats: [ExportFormat],
+        captureColor: Bool,
+        quality: MeshQuality
+    ) async throws -> ScanRecord {
         guard state == .scanning else { throw MeshExportError.nothingToExport }
         guard let frame = arView.session.currentFrame else {
             throw MeshExportError.nothingToExport
@@ -141,6 +147,7 @@ final class ScanSessionController: NSObject, ObservableObject {
                     meshes,
                     name: name,
                     formats: formats,
+                    quality: quality,
                     thumbnail: thumbnail
                 )
             }.value

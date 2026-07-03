@@ -25,41 +25,84 @@ enum ScanArchiver {
         folderURL(for: record).appendingPathComponent("thumbnail.png")
     }
 
+    /// The full-detail captured mesh, kept so crops and re-exports can
+    /// run after capture. Only LiDAR-mode scans have one.
+    static func rawMeshURL(for record: ScanRecord) -> URL {
+        folderURL(for: record).appendingPathComponent("mesh.bin")
+    }
+
+    static func hasRawMesh(_ record: ScanRecord) -> Bool {
+        FileManager.default.fileExists(atPath: rawMeshURL(for: record).path)
+    }
+
     // MARK: - Persisting
 
     static func persistMeshes(
         _ meshes: [CapturedMesh],
         name: String,
         formats: [ExportFormat],
+        quality: MeshQuality,
         thumbnail: UIImage?
     ) throws -> ScanRecord {
+        let rawMesh = RawMesh(merging: meshes)
+        guard !rawMesh.indices.isEmpty else { throw MeshExportError.nothingToExport }
+
         let id = UUID()
         let folder = try createFolder(id: id)
-        let baseName = sanitizedFileName(from: name)
 
-        var files: [ExportedFile] = []
-        for format in formats {
-            let fileName = "\(baseName).\(format.fileExtension)"
-            let url = folder.appendingPathComponent(fileName)
-            try MeshExporter.export(meshes: meshes, format: format, to: url)
-            files.append(ExportedFile(format: format, fileName: fileName, sizeBytes: fileSize(at: url)))
-        }
+        // Always keep the full-detail mesh; exports may be decimated.
+        try rawMesh.write(to: folder.appendingPathComponent("mesh.bin"))
 
         if let data = thumbnail?.pngData() {
             try? data.write(to: folder.appendingPathComponent("thumbnail.png"))
         }
 
-        let record = ScanRecord(
+        var record = ScanRecord(
             id: id,
             name: name,
             createdAt: Date(),
             kind: .lidar,
-            files: files,
-            vertexCount: meshes.reduce(0) { $0 + $1.vertices.count },
-            faceCount: meshes.reduce(0) { $0 + $1.triangleCount }
+            files: [],
+            vertexCount: rawMesh.vertices.count,
+            faceCount: rawMesh.triangleCount
         )
+        record.files = try exportFiles(from: quality.apply(to: rawMesh), record: record, formats: formats)
         try writeMetadata(record, in: folder)
         return record
+    }
+
+    /// Writes the given formats from a mesh into the record's folder,
+    /// overwriting files of the same format.
+    static func exportFiles(
+        from mesh: RawMesh,
+        record: ScanRecord,
+        formats: [ExportFormat]
+    ) throws -> [ExportedFile] {
+        let folder = folderURL(for: record)
+        let baseName = sanitizedFileName(from: record.name)
+        return try formats.map { format in
+            let fileName = "\(baseName).\(format.fileExtension)"
+            let url = folder.appendingPathComponent(fileName)
+            try MeshExporter.export(mesh: mesh, format: format, to: url)
+            return ExportedFile(format: format, fileName: fileName, sizeBytes: fileSize(at: url))
+        }
+    }
+
+    /// Replaces same-format entries in the record's file list with the
+    /// newly written ones and persists the updated metadata.
+    static func mergeFiles(_ newFiles: [ExportedFile], into record: ScanRecord) throws -> ScanRecord {
+        var updated = record
+        for file in newFiles {
+            updated.files.removeAll { $0.format == file.format }
+            updated.files.append(file)
+        }
+        updated.files.sort { $0.fileName < $1.fileName }
+        try saveMetadata(updated)
+        return updated
+    }
+
+    static func saveMetadata(_ record: ScanRecord) throws {
+        try writeMetadata(record, in: folderURL(for: record))
     }
 
     static func persistRoom(_ room: CapturedRoom, name: String) throws -> ScanRecord {

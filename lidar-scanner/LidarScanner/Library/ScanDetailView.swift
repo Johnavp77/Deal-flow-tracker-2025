@@ -1,11 +1,21 @@
 import SwiftUI
 
 struct ScanDetailView: View {
-    let record: ScanRecord
+    @State private var record: ScanRecord
 
     @ObservedObject private var store = ScanStore.shared
     @Environment(\.dismiss) private var dismiss
     @State private var showDeleteConfirmation = false
+    @State private var showCrop = false
+    @State private var showReExport = false
+
+    init(record: ScanRecord) {
+        _record = State(initialValue: record)
+    }
+
+    private var hasRawMesh: Bool {
+        ScanArchiver.hasRawMesh(record)
+    }
 
     private var previewURL: URL? {
         guard let usdz = record.files.first(where: { $0.format == .usdz }) else { return nil }
@@ -18,8 +28,24 @@ struct ScanDetailView: View {
             if let previewURL {
                 Section {
                     ModelPreviewView(url: previewURL)
+                        .id(record)
                         .frame(height: 380)
                         .listRowInsets(EdgeInsets())
+                }
+            }
+
+            if hasRawMesh {
+                Section("Edit") {
+                    Button {
+                        showCrop = true
+                    } label: {
+                        Label("Crop Model", systemImage: "crop")
+                    }
+                    Button {
+                        showReExport = true
+                    } label: {
+                        Label("Re-export Files", systemImage: "square.and.arrow.up.on.square")
+                    }
                 }
             }
 
@@ -59,6 +85,18 @@ struct ScanDetailView: View {
         }
         .navigationTitle(record.name)
         .navigationBarTitleDisplayMode(.inline)
+        .sheet(isPresented: $showCrop) {
+            CropView(record: record) { updated in
+                record = updated
+                store.insert(updated)
+            }
+        }
+        .sheet(isPresented: $showReExport) {
+            ReExportSheet(record: record) { updated in
+                record = updated
+                store.insert(updated)
+            }
+        }
         .confirmationDialog(
             "Delete this scan and all of its exported files?",
             isPresented: $showDeleteConfirmation,

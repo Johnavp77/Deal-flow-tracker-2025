@@ -44,57 +44,74 @@ enum MeshExportError: LocalizedError {
     }
 }
 
-/// All captured mesh chunks merged into a single vertex/index list,
-/// which every export format consumes.
-private struct CombinedMesh {
-    var vertices: [SIMD3<Float>] = []
-    var normals: [SIMD3<Float>] = []
-    var colors: [SIMD3<UInt8>]?
-    var indices: [UInt32] = []
-
-    var triangleCount: Int { indices.count / 3 }
-
-    init(_ meshes: [CapturedMesh]) {
-        let hasColors = meshes.contains { $0.colors != nil }
-        var mergedColors: [SIMD3<UInt8>] = []
-        for mesh in meshes where !mesh.indices.isEmpty {
-            let base = UInt32(vertices.count)
-            vertices.append(contentsOf: mesh.vertices)
-            normals.append(contentsOf: mesh.normals)
-            if hasColors {
-                mergedColors.append(contentsOf: mesh.colors
-                    ?? Array(repeating: ColorProjector.fallbackColor, count: mesh.vertices.count))
-            }
-            indices.append(contentsOf: mesh.indices.map { $0 + base })
-        }
-        colors = hasColors ? mergedColors : nil
-    }
-}
-
-/// Writes captured LiDAR meshes to standard 3D file formats.
+/// Writes a RawMesh to standard 3D file formats.
 /// OBJ and PLY are written directly (so per-vertex colors survive),
 /// STL goes through ModelIO, and USDZ goes through SceneKit.
 enum MeshExporter {
-    static func export(meshes: [CapturedMesh], format: ExportFormat, to url: URL) throws {
-        let combined = CombinedMesh(meshes)
-        guard !combined.indices.isEmpty else {
+    static func export(mesh: RawMesh, format: ExportFormat, to url: URL) throws {
+        guard !mesh.indices.isEmpty else {
             throw MeshExportError.nothingToExport
         }
         switch format {
         case .usdz:
-            try exportUSDZ(combined, to: url)
+            try exportUSDZ(mesh, to: url)
         case .obj:
-            try exportOBJ(combined, to: url)
+            try exportOBJ(mesh, to: url)
         case .ply:
-            try exportPLY(combined, to: url)
+            try exportPLY(mesh, to: url)
         case .stl:
-            try exportSTL(combined, to: url)
+            try exportSTL(mesh, to: url)
         }
+    }
+
+    /// Builds a SceneKit geometry (positions, normals, and vertex colors
+    /// when present) — used for USDZ export and the in-app crop preview.
+    static func makeGeometry(from mesh: RawMesh) -> SCNGeometry {
+        let vertexSource = SCNGeometrySource(vertices: mesh.vertices.map {
+            SCNVector3($0.x, $0.y, $0.z)
+        })
+        let normalSource = SCNGeometrySource(normals: mesh.normals.map {
+            SCNVector3($0.x, $0.y, $0.z)
+        })
+        var sources = [vertexSource, normalSource]
+
+        if let colors = mesh.colors {
+            var components = [Float]()
+            components.reserveCapacity(colors.count * 3)
+            for color in colors {
+                components.append(Float(color.x) / 255)
+                components.append(Float(color.y) / 255)
+                components.append(Float(color.z) / 255)
+            }
+            let colorData = components.withUnsafeBytes { Data($0) }
+            sources.append(SCNGeometrySource(
+                data: colorData,
+                semantic: .color,
+                vectorCount: colors.count,
+                usesFloatComponents: true,
+                componentsPerVector: 3,
+                bytesPerComponent: MemoryLayout<Float>.size,
+                dataOffset: 0,
+                dataStride: MemoryLayout<Float>.size * 3
+            ))
+        }
+
+        let element = SCNGeometryElement(indices: mesh.indices, primitiveType: .triangles)
+        let geometry = SCNGeometry(sources: sources, elements: [element])
+
+        let material = SCNMaterial()
+        material.lightingModel = .physicallyBased
+        material.diffuse.contents = UIColor.white
+        material.roughness.contents = 0.9
+        material.isDoubleSided = true
+        geometry.firstMaterial = material
+
+        return geometry
     }
 
     // MARK: - OBJ (text, optional vertex colors as the common "v x y z r g b" extension)
 
-    private static func exportOBJ(_ mesh: CombinedMesh, to url: URL) throws {
+    private static func exportOBJ(_ mesh: RawMesh, to url: URL) throws {
         FileManager.default.createFile(atPath: url.path, contents: nil)
         guard let handle = try? FileHandle(forWritingTo: url) else {
             throw MeshExportError.writeFailed("Could not open \(url.lastPathComponent) for writing.")
@@ -137,7 +154,7 @@ enum MeshExporter {
 
     // MARK: - PLY (binary little-endian, vertex colors when available)
 
-    private static func exportPLY(_ mesh: CombinedMesh, to url: URL) throws {
+    private static func exportPLY(_ mesh: RawMesh, to url: URL) throws {
         let hasColors = mesh.colors != nil
         var header = """
         ply
@@ -203,7 +220,7 @@ enum MeshExporter {
 
     // MARK: - STL (ModelIO, geometry only)
 
-    private static func exportSTL(_ mesh: CombinedMesh, to url: URL) throws {
+    private static func exportSTL(_ mesh: RawMesh, to url: URL) throws {
         let allocator = MDLMeshBufferDataAllocator()
         let asset = MDLAsset(bufferAllocator: allocator)
 
@@ -247,48 +264,9 @@ enum MeshExporter {
 
     // MARK: - USDZ (SceneKit, vertex colors when available)
 
-    private static func exportUSDZ(_ mesh: CombinedMesh, to url: URL) throws {
-        let vertexSource = SCNGeometrySource(vertices: mesh.vertices.map {
-            SCNVector3($0.x, $0.y, $0.z)
-        })
-        let normalSource = SCNGeometrySource(normals: mesh.normals.map {
-            SCNVector3($0.x, $0.y, $0.z)
-        })
-        var sources = [vertexSource, normalSource]
-
-        if let colors = mesh.colors {
-            var components = [Float]()
-            components.reserveCapacity(colors.count * 3)
-            for color in colors {
-                components.append(Float(color.x) / 255)
-                components.append(Float(color.y) / 255)
-                components.append(Float(color.z) / 255)
-            }
-            let colorData = components.withUnsafeBytes { Data($0) }
-            sources.append(SCNGeometrySource(
-                data: colorData,
-                semantic: .color,
-                vectorCount: colors.count,
-                usesFloatComponents: true,
-                componentsPerVector: 3,
-                bytesPerComponent: MemoryLayout<Float>.size,
-                dataOffset: 0,
-                dataStride: MemoryLayout<Float>.size * 3
-            ))
-        }
-
-        let element = SCNGeometryElement(indices: mesh.indices, primitiveType: .triangles)
-        let geometry = SCNGeometry(sources: sources, elements: [element])
-
-        let material = SCNMaterial()
-        material.lightingModel = .physicallyBased
-        material.diffuse.contents = UIColor.white
-        material.roughness.contents = 0.9
-        material.isDoubleSided = true
-        geometry.firstMaterial = material
-
+    private static func exportUSDZ(_ mesh: RawMesh, to url: URL) throws {
         let scene = SCNScene()
-        scene.rootNode.addChildNode(SCNNode(geometry: geometry))
+        scene.rootNode.addChildNode(SCNNode(geometry: makeGeometry(from: mesh)))
 
         let success = scene.write(to: url, options: nil, delegate: nil, progressHandler: nil)
         guard success else {

@@ -14,6 +14,8 @@ as Polycam's LiDAR mode.
 | **Room mode** | Apple RoomPlan produces a clean parametric model of a room — walls, doors, windows, and detected furniture — exported as USDZ. |
 | **Measurement tool** | Tap any two points during a scan to get a real-world distance (cm/m), with markers and a connecting line rendered in AR. |
 | **Multi-format export** | USDZ (AR Quick Look / Messages / Safari), OBJ (Blender, Unity, Unreal, Maya), STL (3D printing), PLY (research / point-cloud tools). |
+| **Crop tool** | Orbit the saved mesh in 3D and trim everything outside an adjustable crop box — remove floors, walls, and clutter after capture. |
+| **Re-export & decimation** | Every LiDAR scan keeps its full-detail mesh (`mesh.bin`), so you can regenerate any format later at Full / High / Medium / Low detail. Decimation uses grid-based vertex clustering that preserves normals and colors. |
 | **Scan library** | Every scan is saved on-device with a thumbnail, capture stats, and its exported files. Interactive 3D preview via Quick Look, share any file with the system share sheet. |
 | **Files app access** | Exports are stored in the app's Documents folder and are visible in the Files app (`UIFileSharingEnabled`). |
 
@@ -37,7 +39,7 @@ as Polycam's LiDAR mode.
 - **Scan tab** — tap *Start Scan* and move slowly around the subject. The white wireframe overlay shows what has been captured. Use the ruler button to measure, the eye button to toggle the mesh overlay, and *Finish Scan* to name the scan, pick export formats, and choose whether to bake camera color into the mesh.
 - **Room tab** — RoomPlan guides you through scanning a room; tap *Done Scanning* to process, then save the parametric USDZ to the library.
 - **Photo tab** — place a small object on a flat surface, follow the guided capture ring, tap *Finish*, and wait for on-device photogrammetry to reconstruct a textured USDZ (shown on devices that support Object Capture).
-- **Library tab** — browse saved scans, view them in an interactive 3D preview, share individual files, or swipe to delete.
+- **Library tab** — browse saved scans, view them in an interactive 3D preview, share individual files, or swipe to delete. LiDAR scans also offer *Crop Model* (trim the mesh with a 3D crop box) and *Re-export Files* (regenerate any format at a chosen detail level) — both work from the stored full-detail mesh, no rescanning needed.
 
 ## Architecture
 
@@ -52,6 +54,7 @@ LidarScanner/
 │   ├── ExportSheet.swift            Name + format picker, export flow
 │   ├── ARViewContainer.swift        SwiftUI wrapper for RealityKit ARView
 │   ├── CapturedMesh.swift           ARMeshAnchor → world-space value type
+│   ├── RawMesh.swift                Canonical mesh: binary IO, crop, decimation
 │   ├── KeyframeCollector.swift      Color keyframes + vertex colorization
 │   └── MeshExporter.swift           OBJ/PLY writers, ModelIO STL, SceneKit USDZ
 ├── Rooms/
@@ -65,7 +68,9 @@ LidarScanner/
     ├── ScanStore.swift              Observable in-memory catalog
     ├── ScanRecord.swift             Codable scan metadata
     ├── LibraryView.swift            Saved-scan list
-    ├── ScanDetailView.swift         Preview, stats, share, delete
+    ├── ScanDetailView.swift         Preview, stats, edit, share, delete
+    ├── CropView.swift               3D crop box editor (SceneKit)
+    ├── ReExportSheet.swift          Regenerate files from the raw mesh
     └── ModelPreviewView.swift       Quick Look USDZ viewer
 ```
 
@@ -81,7 +86,13 @@ the surface and samples its color — giving vertex-colored output without a
 full UV-texturing pass. OBJ and binary PLY are written directly (so colors
 survive), STL goes through ModelIO, and USDZ through SceneKit. Each scan is
 stored under `Documents/Scans/<uuid>/` with a `metadata.json`, a thumbnail,
-and the exported model files.
+the exported model files, and `mesh.bin` — the full-detail merged mesh in a
+compact binary format. Crop and re-export operate on `mesh.bin`: cropping
+keeps triangles fully inside the box and compacts unused vertices, then
+rewrites the stored mesh and regenerates the existing export files;
+re-export optionally decimates first via grid-based vertex clustering
+(cell size binary-searched to hit the target vertex count, positions,
+normals, and colors averaged per cell).
 
 **Photo mode:** `ObjectCaptureSession` writes its guided capture photos to a
 temporary directory; when the pass completes, `PhotogrammetrySession`

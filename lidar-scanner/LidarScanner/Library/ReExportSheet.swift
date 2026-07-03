@@ -1,25 +1,27 @@
 import SwiftUI
 
-struct ExportSheet: View {
-    @ObservedObject var controller: ScanSessionController
-    var onSaved: (ScanRecord) -> Void
+/// Regenerates export files for a saved scan from its stored raw mesh,
+/// with any format combination and detail level — no rescanning needed.
+struct ReExportSheet: View {
+    let record: ScanRecord
+    var onUpdated: (ScanRecord) -> Void
 
     @Environment(\.dismiss) private var dismiss
-    @State private var name = ""
-    @State private var selectedFormats: Set<ExportFormat> = [.usdz, .obj]
-    @State private var captureColor = true
+    @State private var selectedFormats: Set<ExportFormat>
     @State private var quality: MeshQuality = .full
     @State private var isExporting = false
     @State private var errorMessage: String?
 
+    init(record: ScanRecord, onUpdated: @escaping (ScanRecord) -> Void) {
+        self.record = record
+        self.onUpdated = onUpdated
+        _selectedFormats = State(initialValue: Set(record.files.map(\.format)))
+    }
+
     var body: some View {
         NavigationStack {
             Form {
-                Section("Scan Name") {
-                    TextField("Name", text: $name)
-                }
-
-                Section {
+                Section("Formats") {
                     ForEach(ExportFormat.allCases) { format in
                         Toggle(isOn: binding(for: format)) {
                             VStack(alignment: .leading, spacing: 2) {
@@ -30,16 +32,6 @@ struct ExportSheet: View {
                             }
                         }
                     }
-                } header: {
-                    Text("Export Formats")
-                } footer: {
-                    Text("Mesh chunks captured: \(controller.meshAnchorCount)")
-                }
-
-                Section {
-                    Toggle("Capture color", isOn: $captureColor)
-                } footer: {
-                    Text("Projects camera frames collected during the scan onto the mesh as per-vertex colors (USDZ, OBJ, and PLY). Turn off for faster, geometry-only export.")
                 }
 
                 Section {
@@ -52,7 +44,7 @@ struct ExportSheet: View {
                 } header: {
                     Text("Mesh Detail")
                 } footer: {
-                    Text("Lower detail reduces triangle count for lighter files. The full-detail mesh is always kept, so you can re-export at any level later.")
+                    Text("Files are regenerated from the stored full-detail mesh (\(record.vertexCount.formatted()) vertices). Existing files of the same format are replaced.")
                 }
 
                 if let errorMessage {
@@ -70,10 +62,10 @@ struct ExportSheet: View {
                             Spacer()
                             if isExporting {
                                 ProgressView()
-                                Text("Processing mesh…")
+                                Text("Exporting…")
                                     .padding(.leading, 8)
                             } else {
-                                Text("Export & Save to Library")
+                                Text("Re-export")
                                     .bold()
                             }
                             Spacer()
@@ -82,17 +74,12 @@ struct ExportSheet: View {
                     .disabled(isExporting || selectedFormats.isEmpty)
                 }
             }
-            .navigationTitle("Finish Scan")
+            .navigationTitle("Re-export")
             .navigationBarTitleDisplayMode(.inline)
             .toolbar {
                 ToolbarItem(placement: .cancellationAction) {
-                    Button("Keep Scanning") { dismiss() }
+                    Button("Cancel") { dismiss() }
                         .disabled(isExporting)
-                }
-            }
-            .onAppear {
-                if name.isEmpty {
-                    name = "Scan \(Date.now.formatted(date: .abbreviated, time: .shortened))"
                 }
             }
             .interactiveDismissDisabled(isExporting)
@@ -116,22 +103,23 @@ struct ExportSheet: View {
         isExporting = true
         errorMessage = nil
         let formats = ExportFormat.allCases.filter { selectedFormats.contains($0) }
-        let scanName = name.trimmingCharacters(in: .whitespacesAndNewlines)
+        let baseRecord = record
+        let level = quality
 
         Task {
             do {
-                let record = try await controller.finishScan(
-                    name: scanName.isEmpty ? "Untitled Scan" : scanName,
-                    formats: formats,
-                    captureColor: captureColor,
-                    quality: quality
-                )
+                let updated = try await Task.detached(priority: .userInitiated) { () throws -> ScanRecord in
+                    let raw = try RawMesh.read(from: ScanArchiver.rawMeshURL(for: baseRecord))
+                    let mesh = level.apply(to: raw)
+                    let files = try ScanArchiver.exportFiles(from: mesh, record: baseRecord, formats: formats)
+                    return try ScanArchiver.mergeFiles(files, into: baseRecord)
+                }.value
+                onUpdated(updated)
                 isExporting = false
                 dismiss()
-                onSaved(record)
             } catch {
-                isExporting = false
                 errorMessage = error.localizedDescription
+                isExporting = false
             }
         }
     }
