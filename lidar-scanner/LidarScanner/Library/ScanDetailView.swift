@@ -1,0 +1,73 @@
+import SwiftUI
+
+struct ScanDetailView: View {
+    let record: ScanRecord
+
+    @ObservedObject private var store = ScanStore.shared
+    @Environment(\.dismiss) private var dismiss
+    @State private var showDeleteConfirmation = false
+
+    private var previewURL: URL? {
+        guard let usdz = record.files.first(where: { $0.format == .usdz }) else { return nil }
+        let url = ScanArchiver.fileURL(for: record, file: usdz)
+        return FileManager.default.fileExists(atPath: url.path) ? url : nil
+    }
+
+    var body: some View {
+        List {
+            if let previewURL {
+                Section {
+                    ModelPreviewView(url: previewURL)
+                        .frame(height: 380)
+                        .listRowInsets(EdgeInsets())
+                }
+            }
+
+            Section("Details") {
+                LabeledContent("Type", value: record.kind.displayName)
+                LabeledContent("Captured", value: record.createdAt.formatted(date: .abbreviated, time: .shortened))
+                if record.vertexCount > 0 {
+                    LabeledContent("Vertices", value: record.vertexCount.formatted())
+                    LabeledContent("Triangles", value: record.faceCount.formatted())
+                }
+            }
+
+            Section("Files") {
+                ForEach(record.files) { file in
+                    HStack {
+                        VStack(alignment: .leading, spacing: 2) {
+                            Text(file.fileName)
+                                .font(.subheadline)
+                                .lineLimit(1)
+                            Text(file.sizeBytes, format: .byteCount(style: .file))
+                                .font(.caption)
+                                .foregroundStyle(.secondary)
+                        }
+                        Spacer()
+                        ShareLink(item: ScanArchiver.fileURL(for: record, file: file)) {
+                            Image(systemName: "square.and.arrow.up")
+                        }
+                    }
+                }
+            }
+
+            Section {
+                Button("Delete Scan", role: .destructive) {
+                    showDeleteConfirmation = true
+                }
+            }
+        }
+        .navigationTitle(record.name)
+        .navigationBarTitleDisplayMode(.inline)
+        .confirmationDialog(
+            "Delete this scan and all of its exported files?",
+            isPresented: $showDeleteConfirmation,
+            titleVisibility: .visible
+        ) {
+            Button("Delete", role: .destructive) {
+                store.delete(record)
+                dismiss()
+            }
+        }
+    }
+}
