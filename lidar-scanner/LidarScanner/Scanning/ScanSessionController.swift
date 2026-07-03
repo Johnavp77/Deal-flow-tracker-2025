@@ -45,6 +45,7 @@ final class ScanSessionController: NSObject, ObservableObject {
     private var pendingPoint: SIMD3<Float>?
     private var measurementAnchors: [AnchorEntity] = []
     private let coachingOverlay = ARCoachingOverlayView()
+    private let keyframeCollector = KeyframeCollector()
 
     override init() {
         arView = ARView(frame: .zero)
@@ -89,6 +90,8 @@ final class ScanSessionController: NSObject, ObservableObject {
         clearMeasurements()
         meshAnchorCount = 0
         trackingStatus = "Initializing"
+        keyframeCollector.reset()
+        keyframeCollector.setCollecting(true)
         arView.session.run(
             configuration,
             options: [.resetTracking, .removeExistingAnchors, .resetSceneReconstruction]
@@ -104,6 +107,7 @@ final class ScanSessionController: NSObject, ObservableObject {
     /// Pauses the session if the scan screen goes away mid-scan.
     func pauseIfScanning() {
         guard state == .scanning else { return }
+        keyframeCollector.setCollecting(false)
         arView.session.pause()
         state = .idle
         trackingStatus = "Ready"
@@ -111,7 +115,9 @@ final class ScanSessionController: NSObject, ObservableObject {
 
     /// Captures the current mesh, pauses the session, and writes the
     /// selected file formats to the scan library on a background task.
-    func finishScan(name: String, formats: [ExportFormat]) async throws -> ScanRecord {
+    /// When captureColor is on, collected camera keyframes are projected
+    /// onto the mesh to produce per-vertex colors.
+    func finishScan(name: String, formats: [ExportFormat], captureColor: Bool) async throws -> ScanRecord {
         guard state == .scanning else { throw MeshExportError.nothingToExport }
         guard let frame = arView.session.currentFrame else {
             throw MeshExportError.nothingToExport
@@ -120,12 +126,17 @@ final class ScanSessionController: NSObject, ObservableObject {
         guard !anchors.isEmpty else { throw MeshExportError.nothingToExport }
 
         state = .finishing
+        keyframeCollector.setCollecting(false)
         let thumbnail = await snapshot()
         arView.session.pause()
+        let keyframes = captureColor ? keyframeCollector.snapshot() : []
 
         do {
             let record = try await Task.detached(priority: .userInitiated) {
-                let meshes = anchors.map(CapturedMesh.init)
+                var meshes = anchors.map(CapturedMesh.init)
+                if !keyframes.isEmpty {
+                    meshes = ColorProjector.colorize(meshes, with: keyframes)
+                }
                 return try ScanArchiver.persistMeshes(
                     meshes,
                     name: name,
@@ -220,6 +231,10 @@ final class ScanSessionController: NSObject, ObservableObject {
 // MARK: - ARSessionDelegate
 
 extension ScanSessionController: ARSessionDelegate {
+    nonisolated func session(_ session: ARSession, didUpdate frame: ARFrame) {
+        keyframeCollector.consider(frame)
+    }
+
     nonisolated func session(_ session: ARSession, didAdd anchors: [ARAnchor]) {
         let added = anchors.lazy.filter { $0 is ARMeshAnchor }.count
         guard added > 0 else { return }

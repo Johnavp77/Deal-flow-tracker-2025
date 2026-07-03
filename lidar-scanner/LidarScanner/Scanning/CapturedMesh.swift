@@ -8,6 +8,8 @@ struct CapturedMesh {
     let vertices: [SIMD3<Float>]
     let normals: [SIMD3<Float>]
     let indices: [UInt32]
+    /// Per-vertex RGB, filled in by ColorProjector when color capture is on.
+    var colors: [SIMD3<UInt8>]?
 
     var triangleCount: Int { indices.count / 3 }
 

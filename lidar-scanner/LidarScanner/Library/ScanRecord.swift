@@ -12,11 +12,13 @@ struct ScanRecord: Codable, Hashable, Identifiable {
     enum Kind: String, Codable {
         case lidar
         case room
+        case photo
 
         var displayName: String {
             switch self {
             case .lidar: return "LiDAR Mesh"
             case .room: return "Room Plan"
+            case .photo: return "Photo Mode"
             }
         }
     }

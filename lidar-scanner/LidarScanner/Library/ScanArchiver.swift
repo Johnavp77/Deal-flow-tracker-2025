@@ -84,6 +84,28 @@ enum ScanArchiver {
         return record
     }
 
+    /// Copies an already-built model file (e.g. a photogrammetry USDZ)
+    /// into the library as a new scan.
+    static func persistModelFile(at sourceURL: URL, name: String, kind: ScanRecord.Kind) throws -> ScanRecord {
+        let id = UUID()
+        let folder = try createFolder(id: id)
+        let fileName = "\(sanitizedFileName(from: name)).\(sourceURL.pathExtension.isEmpty ? "usdz" : sourceURL.pathExtension)"
+        let destination = folder.appendingPathComponent(fileName)
+        try FileManager.default.copyItem(at: sourceURL, to: destination)
+
+        let record = ScanRecord(
+            id: id,
+            name: name,
+            createdAt: Date(),
+            kind: kind,
+            files: [ExportedFile(format: .usdz, fileName: fileName, sizeBytes: fileSize(at: destination))],
+            vertexCount: 0,
+            faceCount: 0
+        )
+        try writeMetadata(record, in: folder)
+        return record
+    }
+
     static func delete(_ record: ScanRecord) {
         try? FileManager.default.removeItem(at: folderURL(for: record))
     }

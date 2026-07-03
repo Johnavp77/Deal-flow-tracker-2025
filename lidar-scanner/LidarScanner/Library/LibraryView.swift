@@ -81,9 +81,17 @@ private struct ScanRow: View {
         } else {
             ZStack {
                 Color(.secondarySystemFill)
-                Image(systemName: record.kind == .room ? "house.fill" : "cube.transparent")
+                Image(systemName: placeholderIcon)
                     .foregroundStyle(.secondary)
             }
+        }
+    }
+
+    private var placeholderIcon: String {
+        switch record.kind {
+        case .room: return "house.fill"
+        case .photo: return "camera.fill"
+        case .lidar: return "cube.transparent"
         }
     }
 }

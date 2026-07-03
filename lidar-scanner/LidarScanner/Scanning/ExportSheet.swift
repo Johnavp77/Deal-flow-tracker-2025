@@ -7,6 +7,7 @@ struct ExportSheet: View {
     @Environment(\.dismiss) private var dismiss
     @State private var name = ""
     @State private var selectedFormats: Set<ExportFormat> = [.usdz, .obj]
+    @State private var captureColor = true
     @State private var isExporting = false
     @State private var errorMessage: String?
 
@@ -32,6 +33,12 @@ struct ExportSheet: View {
                     Text("Export Formats")
                 } footer: {
                     Text("Mesh chunks captured: \(controller.meshAnchorCount)")
+                }
+
+                Section {
+                    Toggle("Capture color", isOn: $captureColor)
+                } footer: {
+                    Text("Projects camera frames collected during the scan onto the mesh as per-vertex colors (USDZ, OBJ, and PLY). Turn off for faster, geometry-only export.")
                 }
 
                 if let errorMessage {
@@ -101,7 +108,8 @@ struct ExportSheet: View {
             do {
                 let record = try await controller.finishScan(
                     name: scanName.isEmpty ? "Untitled Scan" : scanName,
-                    formats: formats
+                    formats: formats,
+                    captureColor: captureColor
                 )
                 isExporting = false
                 dismiss()

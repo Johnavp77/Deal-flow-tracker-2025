@@ -1,4 +1,5 @@
 import ARKit
+import RealityKit
 import RoomPlan
 
 /// Runtime capability checks. LiDAR scene reconstruction is available on
@@ -12,5 +13,11 @@ enum DeviceSupport {
     /// True when RoomPlan's parametric room capture is available.
     static var supportsRoomPlan: Bool {
         RoomCaptureSession.isSupported
+    }
+
+    /// True when guided object capture (photogrammetry photo mode) is available.
+    @MainActor
+    static var supportsObjectCapture: Bool {
+        ObjectCaptureSession.isSupported
     }
 }

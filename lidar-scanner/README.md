@@ -9,6 +9,8 @@ as Polycam's LiDAR mode.
 | Feature | How it works |
 | --- | --- |
 | **Live LiDAR mesh scanning** | ARKit scene reconstruction (`.meshWithClassification`) builds a triangle mesh of everything the sensor sees, visualized live over the camera feed. |
+| **Color capture** | Camera keyframes are collected while you scan (movement-gated, downsampled) and projected onto the mesh at export time, producing per-vertex colors in USDZ, OBJ, and PLY. |
+| **Photo mode (photogrammetry)** | iOS 17 `ObjectCaptureSession` guides a photo orbit around a small object, then `PhotogrammetrySession` reconstructs a fully textured USDZ on-device — Polycam's "Photo" capture. |
 | **Room mode** | Apple RoomPlan produces a clean parametric model of a room — walls, doors, windows, and detected furniture — exported as USDZ. |
 | **Measurement tool** | Tap any two points during a scan to get a real-world distance (cm/m), with markers and a connecting line rendered in AR. |
 | **Multi-format export** | USDZ (AR Quick Look / Messages / Safari), OBJ (Blender, Unity, Unreal, Maya), STL (3D printing), PLY (research / point-cloud tools). |
@@ -32,8 +34,9 @@ as Polycam's LiDAR mode.
 
 ## Using the app
 
-- **Scan tab** — tap *Start Scan* and move slowly around the subject. The white wireframe overlay shows what has been captured. Use the ruler button to measure, the eye button to toggle the mesh overlay, and *Finish Scan* to name the scan and pick export formats.
+- **Scan tab** — tap *Start Scan* and move slowly around the subject. The white wireframe overlay shows what has been captured. Use the ruler button to measure, the eye button to toggle the mesh overlay, and *Finish Scan* to name the scan, pick export formats, and choose whether to bake camera color into the mesh.
 - **Room tab** — RoomPlan guides you through scanning a room; tap *Done Scanning* to process, then save the parametric USDZ to the library.
+- **Photo tab** — place a small object on a flat surface, follow the guided capture ring, tap *Finish*, and wait for on-device photogrammetry to reconstruct a textured USDZ (shown on devices that support Object Capture).
 - **Library tab** — browse saved scans, view them in an interactive 3D preview, share individual files, or swipe to delete.
 
 ## Architecture
@@ -49,10 +52,14 @@ LidarScanner/
 │   ├── ExportSheet.swift            Name + format picker, export flow
 │   ├── ARViewContainer.swift        SwiftUI wrapper for RealityKit ARView
 │   ├── CapturedMesh.swift           ARMeshAnchor → world-space value type
-│   └── MeshExporter.swift           ModelIO (OBJ/STL/PLY) + SceneKit (USDZ)
+│   ├── KeyframeCollector.swift      Color keyframes + vertex colorization
+│   └── MeshExporter.swift           OBJ/PLY writers, ModelIO STL, SceneKit USDZ
 ├── Rooms/
 │   ├── RoomScanController.swift     RoomPlan capture session wrapper
 │   └── RoomScanView.swift           Room scanning UI + save sheet
+├── PhotoCapture/
+│   ├── PhotoCaptureController.swift ObjectCaptureSession + PhotogrammetrySession
+│   └── PhotoCaptureView.swift       Guided photo capture UI + save sheet
 └── Library/
     ├── ScanArchiver.swift           On-disk persistence (Documents/Scans)
     ├── ScanStore.swift              Observable in-memory catalog
@@ -63,16 +70,27 @@ LidarScanner/
 ```
 
 **Capture pipeline:** ARKit continuously publishes `ARMeshAnchor`s while
-scanning. On finish, each anchor's Metal-backed geometry buffers are copied
-into plain `CapturedMesh` value types (vertices transformed to world space,
-normals rotated), the session is paused, and export runs on a background task.
-OBJ/STL/PLY are written through ModelIO (`MDLAsset`); USDZ is written through
-SceneKit, which supports USDZ archives on iOS. Each scan is stored under
-`Documents/Scans/<uuid>/` with a `metadata.json`, a thumbnail, and the
-exported model files.
+scanning. In parallel, `KeyframeCollector` grabs a downsampled camera frame
+(with its camera transform and scaled intrinsics) whenever the device has
+moved or rotated enough since the last keyframe. On finish, each anchor's
+Metal-backed geometry buffers are copied into plain `CapturedMesh` value
+types (vertices transformed to world space, normals rotated), the session is
+paused, and export runs on a background task. When color capture is enabled,
+`ColorProjector` picks, for every vertex, the keyframe most directly facing
+the surface and samples its color — giving vertex-colored output without a
+full UV-texturing pass. OBJ and binary PLY are written directly (so colors
+survive), STL goes through ModelIO, and USDZ through SceneKit. Each scan is
+stored under `Documents/Scans/<uuid>/` with a `metadata.json`, a thumbnail,
+and the exported model files.
+
+**Photo mode:** `ObjectCaptureSession` writes its guided capture photos to a
+temporary directory; when the pass completes, `PhotogrammetrySession`
+reconstructs a textured USDZ (`.reduced` detail) on-device with live progress,
+and the result is copied into the same scan library.
 
 ## Limitations & roadmap
 
-- **No photo textures yet.** Exports are untextured geometry (like Polycam's raw LiDAR mesh view). Projecting camera frames onto the mesh for textured export is the natural next step.
-- **Photogrammetry mode** (Polycam's "Photo mode") could be added with iOS 17's `ObjectCaptureSession` + `PhotogrammetrySession` for small-object capture.
-- **Cloud sync / sharing links** are out of scope for this on-device v1; all data stays local.
+- **Vertex colors, not texture atlases.** LiDAR-mode color is per-vertex, so its resolution follows mesh density (Photo mode produces fully textured models). A UV-unwrap + texture-bake pass would be the next refinement.
+- **Occlusion during colorization** is approximated with a surface-facing test rather than full visibility ray-casting, so thin geometry can pick up colors from behind in rare cases.
+- **Photo mode availability** depends on `ObjectCaptureSession.isSupported` (recent Pro devices); the tab hides itself elsewhere.
+- **Cloud sync / sharing links** are out of scope for this on-device app; all data stays local. Files can be shared via the share sheet or the Files app.
