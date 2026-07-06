@@ -7,10 +7,56 @@ import UIKit
 /// thumbnail.png, and a metadata.json describing the scan.
 /// All functions are thread-safe and may run off the main actor.
 enum ScanArchiver {
-    static var scansDirectory: URL {
+    static let useICloudDefaultsKey = "useICloudStorage"
+
+    static var localScansDirectory: URL {
         FileManager.default
             .urls(for: .documentDirectory, in: .userDomainMask)[0]
             .appendingPathComponent("Scans", isDirectory: true)
+    }
+
+    /// Resolved once per launch; the first access can be slow, so the app
+    /// warms it on a background task at startup.
+    static let ubiquityScansDirectory: URL? = FileManager.default
+        .url(forUbiquityContainerIdentifier: nil)?
+        .appendingPathComponent("Documents", isDirectory: true)
+        .appendingPathComponent("Scans", isDirectory: true)
+
+    static var scansDirectory: URL {
+        if UserDefaults.standard.bool(forKey: useICloudDefaultsKey),
+           let cloud = ubiquityScansDirectory {
+            return cloud
+        }
+        return localScansDirectory
+    }
+
+    /// Moves every scan folder between local storage and the iCloud
+    /// container, returning how many were moved. Runs off the main thread.
+    static func migrateScans(toICloud: Bool) throws -> Int {
+        guard let cloud = ubiquityScansDirectory else {
+            throw MeshExportError.writeFailed("iCloud Drive is not available. Sign in to iCloud and enable iCloud Drive for this app.")
+        }
+        let fileManager = FileManager.default
+        let source = toICloud ? localScansDirectory : cloud
+        let destination = toICloud ? cloud : localScansDirectory
+        try fileManager.createDirectory(at: destination, withIntermediateDirectories: true)
+
+        guard let items = try? fileManager.contentsOfDirectory(
+            at: source,
+            includingPropertiesForKeys: [.isDirectoryKey]
+        ) else {
+            return 0
+        }
+
+        var moved = 0
+        for item in items {
+            guard (try? item.resourceValues(forKeys: [.isDirectoryKey]))?.isDirectory == true else { continue }
+            let target = destination.appendingPathComponent(item.lastPathComponent, isDirectory: true)
+            guard !fileManager.fileExists(atPath: target.path) else { continue }
+            try fileManager.setUbiquitous(toICloud, itemAt: item, destinationURL: target)
+            moved += 1
+        }
+        return moved
     }
 
     static func folderURL(for record: ScanRecord) -> URL {
@@ -35,6 +81,21 @@ enum ScanArchiver {
         FileManager.default.fileExists(atPath: rawMeshURL(for: record).path)
     }
 
+    /// Saved ARKit world map, enabling scan resume with relocalization.
+    static func worldMapURL(for record: ScanRecord) -> URL {
+        folderURL(for: record).appendingPathComponent("worldmap.bin")
+    }
+
+    static func hasWorldMap(_ record: ScanRecord) -> Bool {
+        FileManager.default.fileExists(atPath: worldMapURL(for: record).path)
+    }
+
+    static func saveThumbnail(_ image: UIImage, for record: ScanRecord) {
+        if let data = image.pngData() {
+            try? data.write(to: thumbnailURL(for: record))
+        }
+    }
+
     // MARK: - Persisting
 
     static func persistMeshes(
@@ -42,7 +103,8 @@ enum ScanArchiver {
         name: String,
         formats: [ExportFormat],
         quality: MeshQuality,
-        thumbnail: UIImage?
+        thumbnail: UIImage?,
+        worldMapData: Data? = nil
     ) throws -> ScanRecord {
         let rawMesh = RawMesh(merging: meshes)
         guard !rawMesh.indices.isEmpty else { throw MeshExportError.nothingToExport }
@@ -56,6 +118,9 @@ enum ScanArchiver {
         if let data = thumbnail?.pngData() {
             try? data.write(to: folder.appendingPathComponent("thumbnail.png"))
         }
+        if let worldMapData {
+            try? worldMapData.write(to: folder.appendingPathComponent("worldmap.bin"))
+        }
 
         var record = ScanRecord(
             id: id,
@@ -64,7 +129,9 @@ enum ScanArchiver {
             kind: .lidar,
             files: [],
             vertexCount: rawMesh.vertices.count,
-            faceCount: rawMesh.triangleCount
+            faceCount: rawMesh.triangleCount,
+            surfaceAreaSquareMeters: rawMesh.surfaceArea(),
+            volumeCubicMeters: rawMesh.approximateVolume()
         )
         record.files = try exportFiles(from: quality.apply(to: rawMesh), record: record, formats: formats)
         try writeMetadata(record, in: folder)
@@ -170,6 +237,9 @@ enum ScanArchiver {
             let metadataURL = folder.appendingPathComponent("metadata.json")
             guard let data = try? Data(contentsOf: metadataURL),
                   let record = try? JSONDecoder().decode(ScanRecord.self, from: data) else {
+                // Likely an iCloud folder that hasn't downloaded yet —
+                // kick off a download so it appears on a later reload.
+                try? fileManager.startDownloadingUbiquitousItem(at: folder)
                 continue
             }
             records.append(record)

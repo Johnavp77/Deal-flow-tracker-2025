@@ -95,15 +95,42 @@ struct ScanView: View {
             .background(.ultraThinMaterial, in: Capsule())
 
             if controller.measureMode {
-                Text(controller.measurements.isEmpty
-                     ? "Tap two points on the mesh to measure"
-                     : controller.measurements.map(\.formatted).joined(separator: "  •  "))
+                Picker("Tool", selection: $controller.measureTool) {
+                    ForEach(ScanSessionController.MeasureTool.allCases) { tool in
+                        Text(tool.displayName).tag(tool)
+                    }
+                }
+                .pickerStyle(.segmented)
+                .frame(maxWidth: 240)
+
+                Text(measurementReadout)
                     .font(.footnote.bold())
                     .padding(.horizontal, 14)
                     .padding(.vertical, 8)
                     .background(.yellow.opacity(0.85), in: Capsule())
                     .foregroundStyle(.black)
             }
+        }
+    }
+
+    private var measurementReadout: String {
+        switch controller.measureTool {
+        case .distance:
+            return controller.measurements.isEmpty
+                ? "Tap two points on the mesh to measure"
+                : controller.measurements.map(\.formatted).joined(separator: "  •  ")
+        case .area:
+            let count = controller.areaPoints.count
+            guard count >= 3 else {
+                return count == 0
+                    ? "Tap the corners of a floor area"
+                    : "\(count) point\(count == 1 ? "" : "s") — tap at least 3"
+            }
+            return String(
+                format: "Area %.2f m²  •  Perimeter %.2f m",
+                controller.polygonArea,
+                controller.polygonPerimeter
+            )
         }
     }
 
@@ -124,7 +151,15 @@ struct ScanView: View {
                 ) {
                     controller.measureMode.toggle()
                 }
-                if !controller.measurements.isEmpty {
+                if controller.measureMode {
+                    controlButton(
+                        systemImage: "scope",
+                        active: controller.snapToCorners
+                    ) {
+                        controller.snapToCorners.toggle()
+                    }
+                }
+                if !controller.measurements.isEmpty || !controller.areaPoints.isEmpty {
                     controlButton(systemImage: "trash", active: false) {
                         controller.clearMeasurements()
                     }

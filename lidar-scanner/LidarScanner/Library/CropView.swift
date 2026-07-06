@@ -183,6 +183,8 @@ struct CropView: View {
                     var next = baseRecord
                     next.vertexCount = cropped.vertices.count
                     next.faceCount = cropped.triangleCount
+                    next.surfaceAreaSquareMeters = cropped.surfaceArea()
+                    next.volumeCubicMeters = cropped.approximateVolume()
                     let formats = Array(Set(next.files.map(\.format)))
                     let files = try ScanArchiver.exportFiles(from: cropped, record: next, formats: formats)
                     return try ScanArchiver.mergeFiles(files, into: next)

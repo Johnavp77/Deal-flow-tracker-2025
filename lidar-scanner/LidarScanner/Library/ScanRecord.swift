@@ -30,4 +30,8 @@ struct ScanRecord: Codable, Hashable, Identifiable {
     var files: [ExportedFile]
     var vertexCount: Int
     var faceCount: Int
+    // Optional so metadata written by earlier versions still decodes;
+    // defaulted so call sites that don't compute them keep compiling.
+    var surfaceAreaSquareMeters: Double? = nil
+    var volumeCubicMeters: Double? = nil
 }

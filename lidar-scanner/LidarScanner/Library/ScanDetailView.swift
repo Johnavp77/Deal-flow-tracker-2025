@@ -8,6 +8,7 @@ struct ScanDetailView: View {
     @State private var showDeleteConfirmation = false
     @State private var showCrop = false
     @State private var showReExport = false
+    @State private var showResume = false
 
     init(record: ScanRecord) {
         _record = State(initialValue: record)
@@ -15,6 +16,10 @@ struct ScanDetailView: View {
 
     private var hasRawMesh: Bool {
         ScanArchiver.hasRawMesh(record)
+    }
+
+    private var canResume: Bool {
+        hasRawMesh && ScanArchiver.hasWorldMap(record) && DeviceSupport.supportsLidarScanning
     }
 
     private var previewURL: URL? {
@@ -36,6 +41,13 @@ struct ScanDetailView: View {
 
             if hasRawMesh {
                 Section("Edit") {
+                    if canResume {
+                        Button {
+                            showResume = true
+                        } label: {
+                            Label("Resume Scan", systemImage: "arrow.triangle.2.circlepath.camera")
+                        }
+                    }
                     Button {
                         showCrop = true
                     } label: {
@@ -55,6 +67,17 @@ struct ScanDetailView: View {
                 if record.vertexCount > 0 {
                     LabeledContent("Vertices", value: record.vertexCount.formatted())
                     LabeledContent("Triangles", value: record.faceCount.formatted())
+                }
+                if let area = record.surfaceAreaSquareMeters, area > 0 {
+                    LabeledContent("Surface Area", value: String(format: "%.2f m²", area))
+                }
+                if let volume = record.volumeCubicMeters, volume > 0 {
+                    LabeledContent(
+                        "Volume (approx.)",
+                        value: volume < 1
+                            ? String(format: "%.3f m³", volume)
+                            : String(format: "%.2f m³", volume)
+                    )
                 }
             }
 
@@ -95,6 +118,11 @@ struct ScanDetailView: View {
             ReExportSheet(record: record) { updated in
                 record = updated
                 store.insert(updated)
+            }
+        }
+        .fullScreenCover(isPresented: $showResume) {
+            ResumeScanView(record: record) { updated in
+                record = updated
             }
         }
         .confirmationDialog(

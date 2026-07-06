@@ -12,7 +12,10 @@ as Polycam's LiDAR mode.
 | **Color capture** | Camera keyframes are collected while you scan (movement-gated, downsampled) and projected onto the mesh at export time, producing per-vertex colors in USDZ, OBJ, and PLY. |
 | **Photo mode (photogrammetry)** | iOS 17 `ObjectCaptureSession` guides a photo orbit around a small object, then `PhotogrammetrySession` reconstructs a fully textured USDZ on-device — Polycam's "Photo" capture. |
 | **Room mode** | Apple RoomPlan produces a clean parametric model of a room — walls, doors, windows, and detected furniture — exported as USDZ. |
-| **Measurement tool** | Tap any two points during a scan to get a real-world distance (cm/m), with markers and a connecting line rendered in AR. |
+| **Measurement tools** | Distance mode: tap two points for a real-world distance (cm/m). Area mode: tap the corners of a floor region for a floor-plan area and perimeter readout. Taps snap to detected mesh corners/creases (green marker = snapped); toggle with the scope button. |
+| **Scan stats** | Every LiDAR scan records total surface area and approximate enclosed volume, computed from the mesh and shown in the Library. |
+| **Scan resume** | Each scan saves its ARKit world map. Reopen the scan later, relocalize by pointing the device at the captured area, and keep scanning — new geometry merges into the stored mesh. Ideal for large properties. |
+| **iCloud Drive backup** | Optional: move the whole scan library into the app's iCloud container (Settings gear in the Library tab) for cross-device access — no custom backend. |
 | **Multi-format export** | USDZ (AR Quick Look / Messages / Safari), OBJ (Blender, Unity, Unreal, Maya), STL (3D printing), PLY (research / point-cloud tools). |
 | **Crop tool** | Orbit the saved mesh in 3D and trim everything outside an adjustable crop box — remove floors, walls, and clutter after capture. |
 | **Re-export & decimation** | Every LiDAR scan keeps its full-detail mesh (`mesh.bin`), so you can regenerate any format later at Full / High / Medium / Low detail. Decimation uses grid-based vertex clustering that preserves normals and colors. |
@@ -31,15 +34,16 @@ as Polycam's LiDAR mode.
 
 1. Open `lidar-scanner/LidarScanner.xcodeproj` in Xcode.
 2. Select the **LidarScanner** target → *Signing & Capabilities* → choose your team (and change the bundle identifier if needed).
-3. Select your iPhone/iPad as the run destination and press **Run**.
-4. On first launch, grant camera access.
+3. The project references `LidarScanner.entitlements` for iCloud Drive backup. Add the **iCloud** capability (CloudKit not required — just iCloud Documents) with your team, or — if you don't want iCloud / are on a free developer account — delete the `CODE_SIGN_ENTITLEMENTS` build setting; the app runs fine without it and the iCloud toggle simply reports unavailable.
+4. Select your iPhone/iPad as the run destination and press **Run**.
+5. On first launch, grant camera access.
 
 ## Using the app
 
-- **Scan tab** — tap *Start Scan* and move slowly around the subject. The white wireframe overlay shows what has been captured. Use the ruler button to measure, the eye button to toggle the mesh overlay, and *Finish Scan* to name the scan, pick export formats, and choose whether to bake camera color into the mesh.
+- **Scan tab** — tap *Start Scan* and move slowly around the subject. The white wireframe overlay shows what has been captured. The ruler button opens measuring with a Distance/Area tool switch and corner snapping (scope button); the eye button toggles the mesh overlay; *Finish Scan* names the scan, picks export formats, and chooses whether to bake camera color into the mesh.
 - **Room tab** — RoomPlan guides you through scanning a room; tap *Done Scanning* to process, then save the parametric USDZ to the library.
 - **Photo tab** — place a small object on a flat surface, follow the guided capture ring, tap *Finish*, and wait for on-device photogrammetry to reconstruct a textured USDZ (shown on devices that support Object Capture).
-- **Library tab** — browse saved scans, view them in an interactive 3D preview, share individual files, or swipe to delete. LiDAR scans also offer *Crop Model* (trim the mesh with a 3D crop box) and *Re-export Files* (regenerate any format at a chosen detail level) — both work from the stored full-detail mesh, no rescanning needed.
+- **Library tab** — browse saved scans, view them in an interactive 3D preview, share individual files, or swipe to delete. LiDAR scans also offer *Resume Scan* (relocalize and extend the capture — new geometry merges into the stored mesh), *Crop Model* (trim the mesh with a 3D crop box), and *Re-export Files* (regenerate any format at a chosen detail level) — all working from the stored full-detail mesh, no rescanning needed. The gear button opens Settings, where the library can be moved into iCloud Drive.
 
 ## Architecture
 
@@ -49,8 +53,10 @@ LidarScanner/
 ├── ContentView.swift              Tab navigation + capability gating
 ├── Support/DeviceSupport.swift    Runtime LiDAR / RoomPlan checks
 ├── Scanning/
-│   ├── ScanSessionController.swift  ARKit session, live mesh, measurements
+│   ├── ScanSessionController.swift  ARKit session, live mesh, measure tools,
+│   │                                corner snapping, world-map save/resume
 │   ├── ScanView.swift               Scan screen UI (HUD, controls)
+│   ├── ResumeScanView.swift         Relocalize-and-extend flow for saved scans
 │   ├── ExportSheet.swift            Name + format picker, export flow
 │   ├── ARViewContainer.swift        SwiftUI wrapper for RealityKit ARView
 │   ├── CapturedMesh.swift           ARMeshAnchor → world-space value type
@@ -72,6 +78,9 @@ LidarScanner/
     ├── CropView.swift               3D crop box editor (SceneKit)
     ├── ReExportSheet.swift          Regenerate files from the raw mesh
     └── ModelPreviewView.swift       Quick Look USDZ viewer
+└── Settings/
+    ├── StorageSettings.swift        Local ↔ iCloud Drive migration
+    └── SettingsView.swift           Storage settings UI
 ```
 
 **Capture pipeline:** ARKit continuously publishes `ARMeshAnchor`s while

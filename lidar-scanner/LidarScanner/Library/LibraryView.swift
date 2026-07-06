@@ -2,6 +2,7 @@ import SwiftUI
 
 struct LibraryView: View {
     @ObservedObject private var store = ScanStore.shared
+    @State private var showSettings = false
 
     var body: some View {
         NavigationStack {
@@ -26,6 +27,21 @@ struct LibraryView: View {
             .navigationTitle("Library")
             .navigationDestination(for: ScanRecord.self) { record in
                 ScanDetailView(record: record)
+            }
+            .toolbar {
+                ToolbarItem(placement: .topBarTrailing) {
+                    Button {
+                        showSettings = true
+                    } label: {
+                        Image(systemName: "gearshape")
+                    }
+                }
+            }
+            .sheet(isPresented: $showSettings) {
+                SettingsView()
+            }
+            .refreshable {
+                store.reload()
             }
             .onAppear {
                 store.reload()

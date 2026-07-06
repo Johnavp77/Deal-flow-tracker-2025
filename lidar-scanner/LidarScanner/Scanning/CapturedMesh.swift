@@ -55,7 +55,7 @@ struct CapturedMesh {
     }
 }
 
-private extension ARMeshGeometry {
+extension ARMeshGeometry {
     func vertexPosition(at index: Int) -> SIMD3<Float> {
         let source = vertices
         let pointer = source.buffer.contents()

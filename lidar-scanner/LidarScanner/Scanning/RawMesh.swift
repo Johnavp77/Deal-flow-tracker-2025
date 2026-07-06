@@ -84,6 +84,54 @@ struct RawMesh {
         indices = mergedIndices
     }
 
+    /// Concatenates two meshes into one (used when a resumed scan is
+    /// merged into the originally captured mesh).
+    static func merged(_ first: RawMesh, _ second: RawMesh) -> RawMesh {
+        let hasColors = first.colors != nil || second.colors != nil
+        var colors: [SIMD3<UInt8>]?
+        if hasColors {
+            colors = (first.colors ?? Array(repeating: ColorProjector.fallbackColor, count: first.vertices.count))
+                + (second.colors ?? Array(repeating: ColorProjector.fallbackColor, count: second.vertices.count))
+        }
+        let offset = UInt32(first.vertices.count)
+        return RawMesh(
+            vertices: first.vertices + second.vertices,
+            normals: first.normals + second.normals,
+            colors: colors,
+            indices: first.indices + second.indices.map { $0 + offset }
+        )
+    }
+
+    /// Total triangle surface area in square meters.
+    func surfaceArea() -> Double {
+        var total = 0.0
+        var i = 0
+        while i + 2 < indices.count {
+            let a = vertices[Int(indices[i])]
+            let b = vertices[Int(indices[i + 1])]
+            let c = vertices[Int(indices[i + 2])]
+            total += Double(simd_length(simd_cross(b - a, c - a))) / 2
+            i += 3
+        }
+        return total
+    }
+
+    /// Enclosed volume estimate in cubic meters via signed tetrahedra
+    /// (divergence theorem). Scanned meshes are rarely watertight, so
+    /// treat this as an approximation.
+    func approximateVolume() -> Double {
+        var total = 0.0
+        var i = 0
+        while i + 2 < indices.count {
+            let a = vertices[Int(indices[i])]
+            let b = vertices[Int(indices[i + 1])]
+            let c = vertices[Int(indices[i + 2])]
+            total += Double(simd_dot(a, simd_cross(b, c))) / 6
+            i += 3
+        }
+        return abs(total)
+    }
+
     func bounds() -> (min: SIMD3<Float>, max: SIMD3<Float>) {
         guard var minBound = vertices.first else {
             return (.zero, .zero)
